@@ -12,7 +12,7 @@ Version 3.0.0 is that receiver restored, together with the `receivers/common` co
 
 To keep it apart from FUTO's application, as the FCast trademark policy asks, the app has its own name, **Castor Receiver for FCast-V4**, its own id, `io.github.kdpkke.castorreceiver` (service `io.github.kdpkke.castorreceiver.service`), and its own icon. The icon is the mascot of [Castor](https://github.com/stupside/castor), by stupside, used under the MIT License: a Go gopher in a beaver costume, after the Go gopher designed by Renee French (CC BY 4.0). The notice is in `common/assets/icons/app/CASTOR-MASCOT-LICENSE.txt` and ships inside the package. Senders list the TV under its host name. Inside the app the FCast name only appears where it describes compatibility, as in "Scan with a FCast sender app".
 
-It has been tested mostly with automated tests on a desktop machine. On a TV it has had one manual test, made before the app got its own name and id: installed on an LG C2 and used to play two videos cast from Grayjay. The renamed build has not been on a TV yet. See [Tests on a TV](#tests-on-a-tv).
+It has been tested mostly with automated tests on a desktop machine. On a TV it has had two manual tests. The first, before the app got its own name and id, was on an LG C2: two videos cast from Grayjay. The second, of the renamed build, was on an LG C1 with webOS 6, where the receiver speaks protocol version 3: casts from Castor for Android and from a test sender. See [Tests on a TV](#tests-on-a-tv).
 
 ## Protocol versions
 
@@ -23,7 +23,7 @@ The service runs on the Node.js version that ships with the TV, and version 4 ne
 | 5.0, 6.0 | 8.12 | 3 | as before |
 | 22, 23, 26 | 12.21, 12.22, 20.12 | 4 | adds `v=4` and `fp` |
 
-The Node.js versions are those LG documents for each webOS TV release; the version actually on a TV is written at the start of the service log and has not been checked on a device. What decides is the runtime, not the webOS number: the service enables version 4 when its Node.js offers TLS 1.3.
+The Node.js versions are those LG documents for each webOS TV release; the version actually on a TV is written at the start of the service log and has not been read on a device. An LG C1 with webOS 6 (webOS TV SDK 6.5.3) announced version 3, as the table expects. What decides is the runtime, not the webOS number: the service enables version 4 when its Node.js offers TLS 1.3.
 
 The version is chosen per connection. A version 2 or 3 sender keeps working on every TV, also while version 4 senders are connected: each sender gets the shared playback state in its own protocol version.
 
@@ -197,13 +197,36 @@ What those cases cover apart from embedded tracks (track change checks, automati
 
 ## Tests on a TV
 
-Done once, on an LG C2 in Developer Mode, with version 3.0.0 as it was before the rename (app id `com.futo.fcast.receiver`, same code otherwise):
+### LG C2, before the rename
+
+On an LG C2 in Developer Mode, with version 3.0.0 as it was before the rename (app id `com.futo.fcast.receiver`, same code otherwise):
 
 - the package installs and the app opens on its main screen, with the QR code and the IP address;
 - Grayjay for Android, which speaks protocol version 4, finds the receiver and connects to it;
 - two videos cast from Grayjay played correctly: a YouTube video with subtitles and a 4K HDR video with subtitles.
 
-The build with its own name, id and icon has not been installed on a TV. Nothing else has been checked on a TV. The automated tests run the service on desktop Node.js and the frontend in a desktop browser; they say nothing about the TV's video decoder, its browser, the remote control or the app lifecycle.
+### LG C1, version 3.0.0
+
+On 2026-11-18, on an LG OLED48C14LB (C1) in Developer Mode: webOS TV SDK 6.5.3, firmware 03.53.45. The package was built from `0dfdc3b` as in [How to build](#how-to-build), with Node.js 26.12.1; `check-ipk.js` reported `RESULT OK`. It was installed with `ares-install` 3.2.6 and started with `ares-launch`, while no other receiver was listening on port 46899.
+
+- The receiver answered with `Version` 3 and an `Initial` naming `Castor Receiver for FCast-V4` 3.0.0, with the TV's host name as display name.
+- A version 3 test sender, connecting as Castor does (`Version`, `Initial`, `SubscribeEvent` for the three event types, then each command on the same connection):
+  - an MP4 started playing 1.7 s after its `Play`, on the same connection;
+  - at its end the receiver reported `Paused` at the end position and sent `MediaItemEnd`;
+  - a `Play` of another URL after the end played; `Stop` gave `Idle` at once; the first URL played again after the `Stop`;
+  - a live HLS stream started playing 1.8 s after its `Play`; pause, resume and `Stop` were obeyed, and an MP4 played right after the `Stop`.
+- Castor for Android 2.1.0 (test build), in Native, from a tablet on the same Wi-Fi:
+  - a live HLS stream started in 2 s; pause, resume and stop from the app were followed by the TV;
+  - a 10 s MP4 played to its end and Castor ended the cast as completed; the same MP4 cast again right after also played to its end;
+  - in a 52 s MP4, two +10 s steps and a jump to the middle of the timeline: the TV reported the requested time, then went on from the keyframe before it, up to 4 s earlier (36.3 s → 32.3 s, 46.3 s → 42.6 s, 26.3 s).
+
+On the same TV the FUTO receiver from the LG store (its `Initial` carries no app name or version) behaved differently. A `Play` that launched its player closed the connection 0.7 s later; new connections were refused for about 3.5 s, then its `Initial` came back without the media, as if its service had restarted. After some casts it stopped obeying `Stop`, `Pause` and `Play` while it went on reporting its position, until the app was reopened. After a video ended on its own, new `Play`s were only echoed. Version 3.0.0 did none of this in these tests.
+
+Seen on the C1 and not fixed: after a media ends on its own, a `Play` with the same URL and no `Stop` in between is echoed (`PlayUpdate`, `MediaItemChange`) but nothing plays, and no `PlaybackUpdate` came in 15 s. The player skips a `Play` whose URL is the media it already holds (`receivers/common/web/player/Renderer.ts`, as upstream), and since 3.0.0 an ended media stays loaded. Another URL, or a `Stop` first, plays. Castor is not affected: it sends `Stop` whenever a cast ends.
+
+Not checked on the C1: the picture and sound by eye, the main screen, the service log, subtitles, queues, volume and speed, the remote control, discovery by a sender other than Castor, and a restart of the TV.
+
+Nothing else has been checked on a TV. The automated tests run the service on desktop Node.js and the frontend in a desktop browser; they say nothing about the TV's video decoder, its browser, the remote control or the app lifecycle.
 
 Checklist for the rest, on a webOS 22 or later TV:
 
@@ -219,4 +242,4 @@ Checklist for the rest, on a webOS 22 or later TV:
 10. Restart the TV and check the fingerprint in the service log has not changed.
 11. Check the look of the main screen, the player controls and the toasts at 1080p.
 
-Also not tested: webOS 5.0 and 6.0 TVs (version 3 only), and sources that need request headers on a TV.
+Also not tested: webOS 5.0 TVs, the rest of this checklist on webOS 6 (version 3 only), and sources that need request headers on a TV.
